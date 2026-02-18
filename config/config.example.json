@@ -79,10 +79,10 @@
       "password": "your_password",
       "mailbox": "INBOX",
       "check_interval": 30,
+      "forced_polling": false,
       "use_tls": true,
       "allow_from": ["allowed_email@example.com"],
       "attachment_dir": "~/.picoclaw/workspace/attachments",
-      "use_idle": true,
       "smtp_server": "smtp.example.com--eg:smtp.qq.com",
       "smtp_port": 465,
       "smtp_use_tls": true

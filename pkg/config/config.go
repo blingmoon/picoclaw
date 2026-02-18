@@ -149,15 +149,16 @@ type LINEConfig struct {
 }
 
 type EmailConfig struct {
-	Enabled       bool                `json:"enabled" env:"PICOCLAW_CHANNELS_EMAIL_ENABLED"`
-	IMAPServer    string              `json:"imap_server" env:"PICOCLAW_CHANNELS_EMAIL_IMAP_SERVER"`
-	IMAPPort      int                 `json:"imap_port" env:"PICOCLAW_CHANNELS_EMAIL_IMAP_PORT"`
-	Username      string              `json:"username" env:"PICOCLAW_CHANNELS_EMAIL_USERNAME"`
-	Password      string              `json:"password" env:"PICOCLAW_CHANNELS_EMAIL_PASSWORD"`
-	Mailbox       string              `json:"mailbox" env:"PICOCLAW_CHANNELS_EMAIL_MAILBOX"`               // 默认 "INBOX"
-	CheckInterval int                 `json:"check_interval" env:"PICOCLAW_CHANNELS_EMAIL_CHECK_INTERVAL"` // seconds, default 30; used for polling when IDLE disabled or unsupported
-	UseIdle       bool                `json:"use_idle" env:"PICOCLAW_CHANNELS_EMAIL_USE_IDLE"`             // use IMAP IDLE (push) when server supports it; otherwise poll
-	UseTLS        bool                `json:"use_tls" env:"PICOCLAW_CHANNELS_EMAIL_USE_TLS"`
+	Enabled       bool   `json:"enabled" env:"PICOCLAW_CHANNELS_EMAIL_ENABLED"`
+	IMAPServer    string `json:"imap_server" env:"PICOCLAW_CHANNELS_EMAIL_IMAP_SERVER"`
+	IMAPPort      int    `json:"imap_port" env:"PICOCLAW_CHANNELS_EMAIL_IMAP_PORT"`
+	Username      string `json:"username" env:"PICOCLAW_CHANNELS_EMAIL_USERNAME"`
+	Password      string `json:"password" env:"PICOCLAW_CHANNELS_EMAIL_PASSWORD"`
+	Mailbox       string `json:"mailbox" env:"PICOCLAW_CHANNELS_EMAIL_MAILBOX"`               // 默认 "INBOX"
+	CheckInterval int    `json:"check_interval" env:"PICOCLAW_CHANNELS_EMAIL_CHECK_INTERVAL"` // seconds, default 30; used for polling when IDLE disabled or unsupported
+	UseTLS        bool   `json:"use_tls" env:"PICOCLAW_CHANNELS_EMAIL_USE_TLS"`
+	// ForcedPolling: when the mail server does not implement IDLE/NOOP per spec (e.g. NOOP does not return * EXISTS), set true to use application-level polling (check new mail at CheckInterval). Leave false under normal conditions.
+	ForcedPolling bool                `json:"forced_polling" env:"PICOCLAW_CHANNELS_EMAIL_FORCED_POLLING"`
 	AllowFrom     FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_EMAIL_ALLOW_FROM"`
 	AttachmentDir string              `json:"attachment_dir" env:"PICOCLAW_CHANNELS_EMAIL_ATTACHMENT_DIR"`
 	// SMTP send (optional, if not configured, Send is not available)
@@ -332,7 +333,7 @@ func DefaultConfig() *Config {
 				Password:      "",
 				Mailbox:       "INBOX",
 				CheckInterval: 30,
-				UseIdle:       true,
+				ForcedPolling: false,
 				UseTLS:        true,
 				AllowFrom:     FlexibleStringSlice{},
 				SMTPServer:    "",

@@ -490,7 +490,7 @@ Use an inbox as a channel: PicoClaw connects via IMAP to read new mail and (opti
       "password": "YOUR_APP_PASSWORD",
       "mailbox": "INBOX",
       "check_interval": 30,
-      "use_idle": true,
+      "forced_polling": false,
       "use_tls": true,
       "allow_from": ["allowed-sender@example.com"],
       "attachment_dir": "/path/to/save/attachments",
@@ -507,8 +507,8 @@ Use an inbox as a channel: PicoClaw connects via IMAP to read new mail and (opti
 | `imap_server`, `imap_port` | IMAP server (e.g. 993 with TLS). |
 | `username`, `password` | Mailbox login; 163/QQ require app password. |
 | `mailbox` | Folder to watch (default `INBOX`). |
-| `use_idle` | `true`: use IMAP IDLE when supported (push); `false`: poll every `check_interval` seconds. |
-| `check_interval` | Polling interval in seconds when IDLE is off or unsupported (default 30). |
+| `forced_polling` | When the server does not implement IDLE/NOOP per spec, set `true` to use application-level polling; leave `false` normally. |
+| `check_interval` | Polling interval in seconds when using forced polling or when IDLE is unsupported (default 30). |
 | `allow_from` | Allowed sender addresses; only their mails trigger the agent. |
 | `attachment_dir` | Directory to save attachments; leave empty to skip saving. |
 | `smtp_server`, `smtp_port`, `smtp_use_tls` | Optional; if set, the agent can send replies. |

@@ -310,12 +310,13 @@ func (c *EmailChannel) checkLoop(ctx context.Context) {
 	// Run one check immediately
 	c.checkNewEmails()
 
-	if c.config.UseIdle {
+	if !c.config.ForcedPolling {
+		// support IDLE user idle loop, waiting for server push update
 		c.runIdleLoop(ctx, interval)
 		return
 	}
 
-	// Polling mode
+	// not support IDLE user polling mode, check new emails every interval
 	c.mu.Lock()
 	c.checkTicker = time.NewTicker(interval)
 	ticker := c.checkTicker
