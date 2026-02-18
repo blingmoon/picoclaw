@@ -70,6 +70,22 @@
       "reconnect_interval": 5,
       "group_trigger_prefix": [],
       "allow_from": []
+    },
+    "email": {
+      "enabled": false,
+      "imap_server": "imap.example.com--eg:imap.qq.com",
+      "imap_port": 993,
+      "username": "your_email@example.com",
+      "password": "your_password",
+      "mailbox": "INBOX",
+      "check_interval": 30,
+      "use_tls": true,
+      "allow_from": ["allowed_email@example.com"],
+      "attachment_dir": "~/.picoclaw/workspace/attachments",
+      "use_idle": true,
+      "smtp_server": "smtp.example.com--eg:smtp.qq.com",
+      "smtp_port": 465,
+      "smtp_use_tls": true
     }
   },
   "providers": {

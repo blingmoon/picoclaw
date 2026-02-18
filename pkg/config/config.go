@@ -79,6 +79,7 @@ type ChannelsConfig struct {
 	Slack    SlackConfig    `json:"slack"`
 	LINE     LINEConfig     `json:"line"`
 	OneBot   OneBotConfig   `json:"onebot"`
+	Email    EmailConfig    `json:"email"`
 }
 
 type WhatsAppConfig struct {
@@ -145,6 +146,24 @@ type LINEConfig struct {
 	WebhookPort        int                 `json:"webhook_port" env:"PICOCLAW_CHANNELS_LINE_WEBHOOK_PORT"`
 	WebhookPath        string              `json:"webhook_path" env:"PICOCLAW_CHANNELS_LINE_WEBHOOK_PATH"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_LINE_ALLOW_FROM"`
+}
+
+type EmailConfig struct {
+	Enabled       bool                `json:"enabled" env:"PICOCLAW_CHANNELS_EMAIL_ENABLED"`
+	IMAPServer    string              `json:"imap_server" env:"PICOCLAW_CHANNELS_EMAIL_IMAP_SERVER"`
+	IMAPPort      int                 `json:"imap_port" env:"PICOCLAW_CHANNELS_EMAIL_IMAP_PORT"`
+	Username      string              `json:"username" env:"PICOCLAW_CHANNELS_EMAIL_USERNAME"`
+	Password      string              `json:"password" env:"PICOCLAW_CHANNELS_EMAIL_PASSWORD"`
+	Mailbox       string              `json:"mailbox" env:"PICOCLAW_CHANNELS_EMAIL_MAILBOX"`               // 默认 "INBOX"
+	CheckInterval int                 `json:"check_interval" env:"PICOCLAW_CHANNELS_EMAIL_CHECK_INTERVAL"` // seconds, default 30; used for polling when IDLE disabled or unsupported
+	UseIdle       bool                `json:"use_idle" env:"PICOCLAW_CHANNELS_EMAIL_USE_IDLE"`             // use IMAP IDLE (push) when server supports it; otherwise poll
+	UseTLS        bool                `json:"use_tls" env:"PICOCLAW_CHANNELS_EMAIL_USE_TLS"`
+	AllowFrom     FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_EMAIL_ALLOW_FROM"`
+	AttachmentDir string              `json:"attachment_dir" env:"PICOCLAW_CHANNELS_EMAIL_ATTACHMENT_DIR"`
+	// SMTP send (optional, if not configured, Send is not available)
+	SMTPServer string `json:"smtp_server" env:"PICOCLAW_CHANNELS_EMAIL_SMTP_SERVER"`
+	SMTPPort   int    `json:"smtp_port" env:"PICOCLAW_CHANNELS_EMAIL_SMTP_PORT"`       // 465 或 587
+	SMTPUseTLS bool   `json:"smtp_use_tls" env:"PICOCLAW_CHANNELS_EMAIL_SMTP_USE_TLS"` // 465 用 true，587 可用 false+STARTTLS
 }
 
 type OneBotConfig struct {
@@ -304,6 +323,21 @@ func DefaultConfig() *Config {
 				ReconnectInterval:  5,
 				GroupTriggerPrefix: []string{},
 				AllowFrom:          FlexibleStringSlice{},
+			},
+			Email: EmailConfig{
+				Enabled:       false,
+				IMAPServer:    "",
+				IMAPPort:      993,
+				Username:      "",
+				Password:      "",
+				Mailbox:       "INBOX",
+				CheckInterval: 30,
+				UseIdle:       true,
+				UseTLS:        true,
+				AllowFrom:     FlexibleStringSlice{},
+				SMTPServer:    "",
+				SMTPPort:      465,
+				SMTPUseTLS:    true,
 			},
 		},
 		Providers: ProvidersConfig{
