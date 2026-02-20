@@ -32,6 +32,7 @@ var supportedChannels = map[string]bool{
 	"qq":       true,
 	"dingtalk": true,
 	"maixcam":  true,
+	"email":    true,
 }
 
 func findOpenClawConfig(openclawHome string) (string, error) {
@@ -203,6 +204,9 @@ func ConvertConfig(data map[string]any) (*config.Config, []string, error) {
 				if v, ok := getFloat(cMap, "port"); ok {
 					cfg.Channels.MaixCam.Port = int(v)
 				}
+			case "email":
+				cfg.Channels.Email.Enabled = enabled
+				cfg.Channels.Email.AllowFrom = allowFrom
 			}
 		}
 	}
