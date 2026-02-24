@@ -51,6 +51,9 @@ type EmailChannel struct {
 	cancel      context.CancelFunc
 	checkTicker *time.Ticker
 
+	// loopWg waits for checkLoop goroutine to exit in Stop().
+	loopWg sync.WaitGroup
+
 	// reconnect control
 	reconnectClientVersion int
 	reconnectMutex         sync.Mutex
@@ -88,6 +91,7 @@ func (c *EmailChannel) Start(ctx context.Context) error {
 	c.setRunning(true)
 	logger.InfoC("email", "Email channel started")
 
+	c.loopWg.Add(1)
 	go c.checkLoop(runCtx)
 
 	return nil
@@ -110,6 +114,8 @@ func (c *EmailChannel) Stop(ctx context.Context) error {
 		c.imapClient = nil
 	}
 	c.mu.Unlock()
+
+	c.loopWg.Wait() // wait for checkLoop goroutine to exit
 
 	c.setRunning(false)
 	logger.InfoC("email", "Email channel stopped")
@@ -412,6 +418,7 @@ func (c *EmailChannel) reconnectWithBackoff(ctx context.Context) error {
 }
 
 func (c *EmailChannel) checkLoop(ctx context.Context) {
+	defer c.loopWg.Done()
 	interval := time.Duration(c.config.CheckInterval) * time.Second
 	if interval <= 0 {
 		interval = 30 * time.Second

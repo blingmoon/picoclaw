@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -359,4 +360,58 @@ func TestEmailChannel_runIdleLoop(t *testing.T) {
 
 	})
 
+}
+
+func TestEmailChannel_lifecycleCheck(t *testing.T) {
+	// check if the current runtime is go1.25.xx
+	if !strings.HasPrefix(runtime.Version(), "go1.25") {
+		//  github.com/bytedance/mockey v1.4.4 is supported in go1.25.xx
+		t.Skip("skipping test in non-go1.25.xx environment")
+		return
+	}
+
+	mockey.PatchConvey("lifecycle test", t, func() {
+		// --------------- mock start ---------------
+		c := &EmailChannel{
+			BaseChannel: &BaseChannel{
+				bus: bus.NewMessageBus(),
+			},
+			config: config.EmailConfig{
+				Enabled:       true,
+				CheckInterval: 1,
+				ForcedPolling: true,
+				IMAPServer:    "imap.example.com",
+				Username:      "testuser",
+				Password:      "testpassword",
+			},
+		}
+		// mock login and select to return mockClient
+		mockey.Mock(mockey.GetMethod(c, "connect")).To(func(*EmailChannel) error {
+			return nil
+		}).Build()
+		mockey.Mock(mockey.GetMethod(c, "CheckNewEmails")).To(func(*EmailChannel, context.Context) {
+			time.Sleep(1 * time.Second)
+		}).Build()
+		// --------------- mock end ---------------
+		ctx := context.Background()
+		err := c.Start(ctx)
+		assert.NoError(t, err)
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		var stopDone time.Time
+		stopStart := time.Now()
+		go func() {
+			defer wg.Done()
+			c.Stop(ctx)
+			stopDone = time.Now()
+		}()
+		// wait for checkNewEmails to finish
+		assert.True(t, c.IsRunning())
+		wg.Wait()
+		elapsed := stopDone.Sub(stopStart)
+		// stop exit normally
+		assert.False(t, c.IsRunning())
+		// If Stop() did not wait for checkLoop, it would return in milliseconds.
+		assert.GreaterOrEqual(t, elapsed, 1*time.Second, "Stop() must wait for checkLoop (lifecycle compliance)")
+	})
 }
