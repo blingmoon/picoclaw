@@ -175,7 +175,7 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 	if port <= 0 {
 		port = 465
 	}
-	addr := fmt.Sprintf("%s:%d", c.config.SMTPServer, port)
+	addr := fmt.Sprintf("%s:%d", c.config.SMTPServer, port) //nolint:govet // format string is safe, this is domain:port
 	host := c.config.SMTPServer
 
 	if c.config.SMTPUseTLS {
@@ -230,7 +230,9 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 		// Some servers on 587 do not require STARTTLS; continue anyway
 		logger.WarnCF("email",
 			"STARTTLS failed, connection may be unencrypted; credentials could be sent in plaintext",
-			map[string]interface{}{"error": err.Error()})
+			map[string]interface{}{
+				"error": err.Error(),
+			})
 		_ = err
 	}
 	auth := smtp.PlainAuth("", c.config.Username, c.config.Password, host)
@@ -291,7 +293,7 @@ func (c *EmailChannel) connect() error {
 
 	status, err := cl.Select(mailbox, false)
 	if err != nil {
-		if strings.Contains(err.Error(), "Unsafe Login") || strings.Contains(err.Error(), "不安全") {
+		if strings.Contains(err.Error(), "Unsafe Login") || strings.Contains(err.Error(), "不安全") { //nolint:gosmopolitan
 			return fmt.Errorf(
 				"failed to select mailbox %s: %w (hint: 163/QQ/126 require app password, not account password)",
 				mailbox, err)
@@ -575,7 +577,8 @@ func (c *EmailChannel) CheckNewEmails(ctx context.Context) {
 			})
 			c.closeIMAPClient()
 			if err := c.reconnectWithBackoff(ctx); err != nil {
-				logger.ErrorCF("email", "Failed to reconnect after search emails error", map[string]interface{}{"error": err.Error()})
+				logger.ErrorCF("email", "Failed to reconnect after search emails error",
+					map[string]interface{}{"error": err.Error()})
 				return
 			}
 			continue

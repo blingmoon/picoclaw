@@ -270,9 +270,9 @@ type EmailConfig struct {
 	Username      string `json:"username" env:"PICOCLAW_CHANNELS_EMAIL_USERNAME"`
 	Password      string `json:"password" env:"PICOCLAW_CHANNELS_EMAIL_PASSWORD"`
 	Mailbox       string `json:"mailbox" env:"PICOCLAW_CHANNELS_EMAIL_MAILBOX"`               // 默认 "INBOX"
-	CheckInterval int    `json:"check_interval" env:"PICOCLAW_CHANNELS_EMAIL_CHECK_INTERVAL"` // seconds, default 30; used for polling when IDLE disabled or unsupported
+	CheckInterval int    `json:"check_interval" env:"PICOCLAW_CHANNELS_EMAIL_CHECK_INTERVAL"` // seconds, default 30; polling when IDLE disabled
 	UseTLS        bool   `json:"use_tls" env:"PICOCLAW_CHANNELS_EMAIL_USE_TLS"`
-	// ForcedPolling: when the mail server does not implement IDLE/NOOP per spec (e.g. NOOP does not return * EXISTS), set true to use application-level polling (check new mail at CheckInterval). Leave false under normal conditions.
+	// ForcedPolling: when the mail server does not implement IDLE/NOOP per spec, set true to use app-level polling at CheckInterval.
 	ForcedPolling bool                `json:"forced_polling" env:"PICOCLAW_CHANNELS_EMAIL_FORCED_POLLING"`
 	AllowFrom     FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_EMAIL_ALLOW_FROM"`
 	AttachmentDir string              `json:"attachment_dir" env:"PICOCLAW_CHANNELS_EMAIL_ATTACHMENT_DIR"`

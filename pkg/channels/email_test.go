@@ -94,8 +94,8 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 	})
 
 	t.Run("plain text body", func(t *testing.T) {
-		mimeBytes := []byte(
-			"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world")
+		mimeBytes := []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\n" +
+			"Content-Type: text/plain; charset=utf-8\r\n\r\nHello world")
 		section := &imap.BodySectionName{}
 		msg := &imap.Message{
 			Uid:      1,
@@ -311,7 +311,7 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 		// --------------- mock end ---------------
 		ctx := context.Background()
 		c.CheckNewEmails(context.Background())
-		timeoutCtx, _ := context.WithTimeout(ctx, time.Second)
+		timeoutCtx, _ := context.WithTimeout(ctx, time.Second) // nolint:govet // context.WithTimeout is safe
 		messge, ok := c.bus.ConsumeInbound(timeoutCtx)
 		assert.True(t, ok)
 		assert.True(t, strings.Contains(messge.Content, "Hello world"))
