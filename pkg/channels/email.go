@@ -11,6 +11,7 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -175,7 +176,7 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 	if port <= 0 {
 		port = 465
 	}
-	addr := fmt.Sprintf("%s:%d", c.config.SMTPServer, port) //nolint:govet // format string is safe, this is domain:port
+	addr := net.JoinHostPort(c.config.SMTPServer, strconv.Itoa(port))
 	host := c.config.SMTPServer
 
 	if c.config.SMTPUseTLS {
@@ -230,9 +231,7 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 		// Some servers on 587 do not require STARTTLS; continue anyway
 		logger.WarnCF("email",
 			"STARTTLS failed, connection may be unencrypted; credentials could be sent in plaintext",
-			map[string]interface{}{
-				"error": err.Error(),
-			})
+			map[string]any{"error": err.Error()})
 		_ = err
 	}
 	auth := smtp.PlainAuth("", c.config.Username, c.config.Password, host)
@@ -317,7 +316,7 @@ func (c *EmailChannel) connect() error {
 		}
 	}
 
-	logger.InfoCF("email", "Connected to IMAP server", map[string]interface{}{
+	logger.InfoCF("email", "Connected to IMAP server", map[string]any{
 		"server":   c.config.IMAPServer,
 		"mailbox":  mailbox,
 		"last_uid": c.lastUID,
@@ -403,7 +402,7 @@ func (c *EmailChannel) reconnectWithBackoff(ctx context.Context) error {
 		if err == nil {
 			return nil
 		}
-		logger.ErrorCF("email", "IMAP reconnect failed, retrying with backoff", map[string]interface{}{
+		logger.ErrorCF("email", "IMAP reconnect failed, retrying with backoff", map[string]any{
 			"error": err.Error(), "backoff": backoff.String(),
 		})
 		timer := time.NewTimer(backoff)
@@ -480,7 +479,7 @@ func (c *EmailChannel) runIdleLoop(ctx context.Context, pollInterval time.Durati
 		}
 		if cl.State() != imap.SelectedState {
 			if err := c.reconnectWithBackoff(ctx); err != nil {
-				logger.ErrorCF("email", "Failed to reconnect after IDLE error", map[string]interface{}{"error": err.Error()})
+				logger.ErrorCF("email", "Failed to reconnect after IDLE error", map[string]any{"error": err.Error()})
 				return
 			}
 			continue
@@ -510,10 +509,14 @@ func (c *EmailChannel) runIdleLoop(ctx context.Context, pollInterval time.Durati
 					c.imapClient.Updates = nil
 				}
 				c.mu.Unlock()
-				logger.ErrorCF("email", "IDLE ended with error after update", map[string]interface{}{"error": err.Error()})
+				logger.ErrorCF("email", "IDLE ended with error after update", map[string]any{"error": err.Error()})
 				if err := c.reconnectWithBackoff(ctx); err != nil {
 					// reconnect failed, exit IDLE loop
-					logger.ErrorCF("email", "Failed to reconnect after IDLE error", map[string]interface{}{"error": err.Error()})
+					logger.ErrorCF(
+						"email",
+						"Failed to reconnect after IDLE error",
+						map[string]any{"error": err.Error()},
+					)
 					return
 				}
 			}
@@ -526,10 +529,14 @@ func (c *EmailChannel) runIdleLoop(ctx context.Context, pollInterval time.Durati
 					c.imapClient.Updates = nil
 				}
 				c.mu.Unlock()
-				logger.ErrorCF("email", "IDLE ended with error", map[string]interface{}{"error": err.Error()})
+				logger.ErrorCF("email", "IDLE ended with error", map[string]any{"error": err.Error()})
 				if err := c.reconnectWithBackoff(ctx); err != nil {
 					// reconnect failed , exit IDLE loop
-					logger.ErrorCF("email", "Failed to reconnect after IDLE error", map[string]interface{}{"error": err.Error()})
+					logger.ErrorCF(
+						"email",
+						"Failed to reconnect after IDLE error",
+						map[string]any{"error": err.Error()},
+					)
 					return
 				}
 			}
@@ -572,13 +579,13 @@ func (c *EmailChannel) CheckNewEmails(ctx context.Context) {
 
 		uids, err := cl.UidSearch(criteria)
 		if err != nil {
-			logger.ErrorCF("email", "Failed to search emails", map[string]interface{}{
+			logger.ErrorCF("email", "Failed to search emails", map[string]any{
 				"error": err.Error(),
 			})
 			c.closeIMAPClient()
 			if err := c.reconnectWithBackoff(ctx); err != nil {
 				logger.ErrorCF("email", "Failed to reconnect after search emails error",
-					map[string]interface{}{"error": err.Error()})
+					map[string]any{"error": err.Error()})
 				return
 			}
 			continue
@@ -615,20 +622,27 @@ func (c *EmailChannel) CheckNewEmails(ctx context.Context) {
 			// Mark as seen after fully read
 			seenSet := new(imap.SeqSet)
 			seenSet.AddNum(msg.Uid)
-			if err := cl.UidStore(seenSet, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.SeenFlag}, nil); err != nil {
-				logger.DebugCF("email", "Failed to mark email as seen", map[string]interface{}{
+			if err := cl.UidStore(
+				seenSet,
+				imap.FormatFlagsOp(imap.AddFlags, true),
+				[]any{imap.SeenFlag},
+				nil,
+			); err != nil {
+				logger.DebugCF("email", "Failed to mark email as seen", map[string]any{
 					"uid": msg.Uid, "error": err.Error(),
 				})
 			}
 		}
 
 		if err := <-done; err != nil {
-			logger.ErrorCF("email", "Failed to fetch emails", map[string]interface{}{
+			logger.ErrorCF("email", "Failed to fetch emails", map[string]any{
 				"error": err.Error(),
 			})
 			c.closeIMAPClient()
 			if err := c.reconnectWithBackoff(ctx); err != nil {
-				logger.ErrorCF("email", "Failed to reconnect after fetch emails error", map[string]interface{}{"error": err.Error()})
+				logger.ErrorCF("email", "Failed to reconnect after fetch emails error", map[string]any{
+					"error": err.Error(),
+				})
 				return
 			}
 			continue
@@ -671,7 +685,7 @@ func (c *EmailChannel) processEmail(msg *imap.Message) {
 
 	// Check allowlist
 	if !c.IsAllowed(senderID) {
-		logger.DebugCF("email", "Email from unauthorized sender", map[string]interface{}{
+		logger.DebugCF("email", "Email from unauthorized sender", map[string]any{
 			"sender": senderID,
 		})
 		return
@@ -698,7 +712,7 @@ func (c *EmailChannel) processEmail(msg *imap.Message) {
 		metadata["to"] = fmt.Sprintf("%s@%s", to.MailboxName, to.HostName)
 	}
 
-	logger.InfoCF("email", "Email received", map[string]interface{}{
+	logger.InfoCF("email", "Email received", map[string]any{
 		"sender_id": senderID,
 		"subject":   envelope.Subject,
 		"preview":   utils.Truncate(content, 80),
@@ -722,7 +736,7 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 	bodySection := &imap.BodySectionName{}
 	bodyReader := msg.GetBody(bodySection)
 	if bodyReader == nil {
-		logger.DebugCF("email", "No body in FETCH response", map[string]interface{}{"uid": msg.Uid})
+		logger.DebugCF("email", "No body in FETCH response", map[string]any{"uid": msg.Uid})
 		if subject != "" {
 			return fmt.Sprintf("Subject: %s\n\n[No body content]", subject), nil
 		}
@@ -731,7 +745,7 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 
 	mr, err := mail.CreateReader(bodyReader)
 	if err != nil {
-		logger.DebugCF("email", "Failed to create mail reader", map[string]interface{}{"error": err.Error()})
+		logger.DebugCF("email", "Failed to create mail reader", map[string]any{"error": err.Error()})
 		if subject != "" {
 			return fmt.Sprintf("Subject: %s\n\n[Failed to parse email body]", subject), nil
 		}
@@ -750,7 +764,7 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 			break
 		}
 		if err != nil {
-			logger.DebugCF("email", "Failed to read email part", map[string]interface{}{"error": err.Error()})
+			logger.DebugCF("email", "Failed to read email part", map[string]any{"error": err.Error()})
 			continue
 		}
 
@@ -771,7 +785,8 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 					mediaPaths = append(mediaPaths, localPath)
 					attachmentRefs = append(attachmentRefs, fmt.Sprintf("[attachment: %s]", filepath.Base(localPath)))
 				} else {
-					attachmentRefs = append(attachmentRefs, fmt.Sprintf("[attachment: %s (save failed, you can check the attachment size limit in the config(attachment_max_bytes))]", filename))
+					attachmentRefs = append(attachmentRefs,
+						fmt.Sprintf("[attachment: %s (save failed, check attachment_max_bytes in config)]", filename))
 				}
 			} else {
 				attachmentRefs = append(attachmentRefs, fmt.Sprintf("[attachment: %s]", filename))
@@ -789,7 +804,13 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 			continue
 		}
 		if len(body) > int(limit) {
-			textParts = append(textParts, fmt.Sprintf("[body part exceeds size limit (max %d bytes), you can check body_part_max_bytes in config]", limit))
+			textParts = append(
+				textParts,
+				fmt.Sprintf(
+					"[body part exceeds size limit (max %d bytes), you can check body_part_max_bytes in config]",
+					limit,
+				),
+			)
 			continue
 		}
 		bodyStr := strings.TrimSpace(string(body))
@@ -839,7 +860,7 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 		return ""
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		logger.DebugCF("email", "Failed to create attachment dir", map[string]interface{}{"error": err.Error(), "dir": dir})
+		logger.DebugCF("email", "Failed to create attachment dir", map[string]any{"error": err.Error(), "dir": dir})
 		return ""
 	}
 	limit := int64(c.config.AttachmentMaxBytes)
@@ -855,7 +876,11 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 	localPath := filepath.Join(dir, localName)
 	f, err := os.Create(localPath)
 	if err != nil {
-		logger.DebugCF("email", "Failed to create attachment file", map[string]interface{}{"error": err.Error(), "path": localPath})
+		logger.DebugCF(
+			"email",
+			"Failed to create attachment file",
+			map[string]any{"error": err.Error(), "path": localPath},
+		)
 		return ""
 	}
 	defer f.Close()
@@ -864,12 +889,16 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 	n, err := io.Copy(f, limited)
 	if err != nil {
 		_ = os.Remove(localPath)
-		logger.DebugCF("email", "Failed to write attachment", map[string]interface{}{"error": err.Error(), "path": localPath})
+		logger.DebugCF("email", "Failed to write attachment", map[string]any{"error": err.Error(), "path": localPath})
 		return ""
 	}
 	if n > limit {
 		_ = os.Remove(localPath)
-		logger.DebugCF("email", "Attachment exceeds size limit, skipped", map[string]interface{}{"path": localPath, "limit": limit})
+		logger.DebugCF(
+			"email",
+			"Attachment exceeds size limit, skipped",
+			map[string]any{"path": localPath, "limit": limit},
+		)
 		return ""
 	}
 	return localPath

@@ -179,7 +179,7 @@ func (m *Manager) initChannels() error {
 		logger.DebugC("channels", "Attempting to initialize Email channel")
 		email, err := NewEmailChannel(m.config.Channels.Email, m.bus)
 		if err != nil {
-			logger.ErrorCF("channels", "Failed to initialize Email channel", map[string]interface{}{
+			logger.ErrorCF("channels", "Failed to initialize Email channel", map[string]any{
 				"error": err.Error(),
 			})
 		} else {

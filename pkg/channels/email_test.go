@@ -68,9 +68,21 @@ func TestEmailChannel_decodeRFC2047Filename(t *testing.T) {
 		s    string
 		want string
 	}{
-		{name: "normal", s: "正常.png", want: "正常.png"},
-		{name: "GB2312-Quoted-Printable", s: "=?GB2312?Q?gb2312=B2=E2=CA=D4=B2=E2=CA=D4.png?=", want: "gb2312测试测试.png"},
-		{name: "GBK-Base64", s: "=?GBK?B?yfqzybLiytTNvMasLnBuZw==?=", want: "生成测试图片.png"},
+		{
+			name: "normal",
+			s:    "正常.png", //nolint:gosmopolitan
+			want: "正常.png", //nolint:gosmopolitan
+		},
+		{
+			name: "GB2312-Quoted-Printable",
+			s:    "=?GB2312?Q?gb2312=B2=E2=CA=D4=B2=E2=CA=D4.png?=",
+			want: "gb2312测试测试.png", //nolint:gosmopolitan
+		},
+		{
+			name: "GBK-Base64",
+			s:    "=?GBK?B?yfqzybLiytTNvMasLnBuZw==?=",
+			want: "生成测试图片.png", //nolint:gosmopolitan
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,7 +121,9 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 	})
 
 	t.Run("html body", func(t *testing.T) {
-		mimeBytes := []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><h1>Hello world</h1></body></html>")
+		mimeBytes := []byte(
+			"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><h1>Hello world</h1></body></html>",
+		)
 		section := &imap.BodySectionName{}
 		msg := &imap.Message{
 			Uid:      1,
@@ -182,7 +196,11 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
 		}
 		content, paths := newLimitClient.extractEmailBodyAndAttachments(msg)
-		assert.Contains(t, content, "[body part exceeds size limit (max 1 bytes), you can check body_part_max_bytes in config]")
+		assert.Contains(
+			t,
+			content,
+			"[body part exceeds size limit (max 1 bytes), you can check body_part_max_bytes in config]",
+		)
 		assert.NotEmpty(t, paths)
 		assert.Equal(t, 1, len(paths))
 		assert.Contains(t, paths[0], filepath.Base(paths[0]))
@@ -271,21 +289,28 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 		mockClient := &client.Client{}
 		c.imapClient = mockClient
 		// mock login and select to return mockClient
-		mockey.Mock(mockey.GetMethod(mockClient, "Login")).To(func(imapClient *client.Client, username, password string) error {
-			return nil
-		}).Build()
-		mockey.Mock(mockey.GetMethod(mockClient, "Select")).To(func(imapClient *client.Client, mailbox string, readonly bool) (*imap.MailboxStatus, error) {
-			return &imap.MailboxStatus{
-				UidNext: 20,
-			}, nil
-		}).Build()
-		mockey.Mock(mockey.GetMethod(mockClient, "UidSearch")).To(func(imapClient *client.Client, criteria *imap.SearchCriteria) ([]uint32, error) {
-			return []uint32{21}, nil
-		}).Build()
+		mockey.Mock(mockey.GetMethod(mockClient, "Login")).
+			To(func(imapClient *client.Client, username, password string) error {
+				return nil
+			}).
+			Build()
+		mockey.Mock(mockey.GetMethod(mockClient, "Select")).
+			To(func(imapClient *client.Client, mailbox string, readonly bool) (*imap.MailboxStatus, error) {
+				return &imap.MailboxStatus{
+					UidNext: 20,
+				}, nil
+			}).
+			Build()
+		mockey.Mock(mockey.GetMethod(mockClient, "UidSearch")).
+			To(func(imapClient *client.Client, criteria *imap.SearchCriteria) ([]uint32, error) {
+				return []uint32{21}, nil
+			}).
+			Build()
 		mockey.Mock(mockey.GetMethod(mockClient, "UidFetch")).To(
 			func(imapClient *client.Client, seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
 				mimeBytes := []byte(
-					"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world")
+					"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world",
+				)
 				section := &imap.BodySectionName{}
 				msg := &imap.Message{
 					Uid:      1,
@@ -303,7 +328,7 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 			return imap.SelectedState
 		}).Build()
 		mockey.Mock(mockey.GetMethod(mockClient, "UidStore")).To(
-			func(imapClient *client.Client, seqset *imap.SeqSet, item imap.StoreItem, value interface{},
+			func(imapClient *client.Client, seqset *imap.SeqSet, item imap.StoreItem, value any,
 				ch chan *imap.Message,
 			) error {
 				return nil
@@ -311,7 +336,8 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 		// --------------- mock end ---------------
 		ctx := context.Background()
 		c.CheckNewEmails(context.Background())
-		timeoutCtx, _ := context.WithTimeout(ctx, time.Second) // nolint:govet // context.WithTimeout is safe
+		timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
 		messge, ok := c.bus.ConsumeInbound(timeoutCtx)
 		assert.True(t, ok)
 		assert.True(t, strings.Contains(messge.Content, "Hello world"))
@@ -351,11 +377,13 @@ func TestEmailChannel_runIdleLoop(t *testing.T) {
 			return imap.SelectedState
 		}).Build()
 		triggerChannel := make(chan struct{}, 1)
-		mockey.Mock(mockey.GetMethod(mockClient, "Idle")).To(func(self *client.Client, stop <-chan struct{}, opts *client.IdleOptions) error {
-			<-triggerChannel
-			self.Updates <- &client.StatusUpdate{}
-			return nil
-		}).Build()
+		mockey.Mock(mockey.GetMethod(mockClient, "Idle")).
+			To(func(self *client.Client, stop <-chan struct{}, opts *client.IdleOptions) error {
+				<-triggerChannel
+				self.Updates <- &client.StatusUpdate{}
+				return nil
+			}).
+			Build()
 		// --------------- mock end ---------------
 		ctx := context.Background()
 		go c.runIdleLoop(ctx, 2*time.Second)
