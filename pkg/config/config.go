@@ -468,7 +468,6 @@ type ExecConfig struct {
 	CustomDenyPatterns []string `json:"custom_deny_patterns" env:"PICOCLAW_TOOLS_EXEC_CUSTOM_DENY_PATTERNS"`
 }
 
-
 type ToolsConfig struct {
 	Web    WebToolsConfig    `json:"web"`
 	Cron   CronToolsConfig   `json:"cron"`

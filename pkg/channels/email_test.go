@@ -13,13 +13,13 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestEmailChannel_sanitizeHeaderValue(t *testing.T) {
-
 	tests := []struct {
 		name string
 		s    string
@@ -61,6 +61,7 @@ func TestEmailChannel_parseFilenameFromDisposition(t *testing.T) {
 		})
 	}
 }
+
 func TestEmailChannel_decodeRFC2047Filename(t *testing.T) {
 	tests := []struct {
 		name string
@@ -93,7 +94,8 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 	})
 
 	t.Run("plain text body", func(t *testing.T) {
-		mimeBytes := []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world")
+		mimeBytes := []byte(
+			"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world")
 		section := &imap.BodySectionName{}
 		msg := &imap.Message{
 			Uid:      1,
@@ -172,7 +174,6 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 		},
 	}
 	t.Run("body part max bytes", func(t *testing.T) {
-
 		mimeBytes := attachmentwithText
 		section := &imap.BodySectionName{}
 		msg := &imap.Message{
@@ -189,7 +190,6 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 }
 
 func TestEmailChannel_extractTextFromHTML(t *testing.T) {
-
 	tests := []struct {
 		name string
 		s    string
@@ -282,24 +282,32 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 		mockey.Mock(mockey.GetMethod(mockClient, "UidSearch")).To(func(imapClient *client.Client, criteria *imap.SearchCriteria) ([]uint32, error) {
 			return []uint32{21}, nil
 		}).Build()
-		mockey.Mock(mockey.GetMethod(mockClient, "UidFetch")).To(func(imapClient *client.Client, seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
-			mimeBytes := []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world")
-			section := &imap.BodySectionName{}
-			msg := &imap.Message{
-				Uid:      1,
-				Envelope: &imap.Envelope{Subject: "Test"},
-				Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
-			}
-			ch <- msg
-			close(ch)
-			return nil
-		}).Build()
+		mockey.Mock(mockey.GetMethod(mockClient, "UidFetch")).To(
+			func(imapClient *client.Client, seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
+				mimeBytes := []byte(
+					"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello world")
+				section := &imap.BodySectionName{}
+				msg := &imap.Message{
+					Uid:      1,
+					Envelope: &imap.Envelope{Subject: "Test"},
+					Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
+				}
+				ch <- msg
+				close(ch)
+				return nil
+			}).Build()
+		mockClient.SetState(imap.SelectedState, &imap.MailboxStatus{
+			UidNext: 20,
+		})
 		mockey.Mock(mockey.GetMethod(mockClient, "State")).To(func(*client.Client) imap.ConnState {
 			return imap.SelectedState
 		}).Build()
-		mockey.Mock(mockey.GetMethod(mockClient, "UidStore")).To(func(imapClient *client.Client, seqset *imap.SeqSet, item imap.StoreItem, value interface{}, ch chan *imap.Message) error {
-			return nil
-		}).Build()
+		mockey.Mock(mockey.GetMethod(mockClient, "UidStore")).To(
+			func(imapClient *client.Client, seqset *imap.SeqSet, item imap.StoreItem, value interface{},
+				ch chan *imap.Message,
+			) error {
+				return nil
+			}).Build()
 		// --------------- mock end ---------------
 		ctx := context.Background()
 		c.CheckNewEmails(context.Background())
@@ -308,7 +316,6 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 		assert.True(t, ok)
 		assert.True(t, strings.Contains(messge.Content, "Hello world"))
 	})
-
 }
 
 func TestEmailChannel_runIdleLoop(t *testing.T) {
@@ -322,7 +329,7 @@ func TestEmailChannel_runIdleLoop(t *testing.T) {
 	// mock connect to return mockClient
 	mockey.PatchConvey("runIdleLoop", t, func() {
 		// --------------- mock start ---------------
-		var hasCheckEmail = false
+		hasCheckEmail := false
 		c := &EmailChannel{
 			BaseChannel: &BaseChannel{
 				bus: bus.NewMessageBus(),
@@ -357,9 +364,7 @@ func TestEmailChannel_runIdleLoop(t *testing.T) {
 		triggerChannel <- struct{}{}
 		time.Sleep(time.Second)
 		assert.True(t, hasCheckEmail)
-
 	})
-
 }
 
 func TestEmailChannel_lifecycleCheck(t *testing.T) {

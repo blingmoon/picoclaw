@@ -19,11 +19,12 @@ import (
 	"github.com/emersion/go-imap/client"
 	charset "github.com/emersion/go-message/charset"
 	"github.com/emersion/go-message/mail"
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/utils"
-	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 func init() {
@@ -227,9 +228,9 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 	defer client.Close()
 	if err = client.StartTLS(&tls.Config{ServerName: host}); err != nil {
 		// Some servers on 587 do not require STARTTLS; continue anyway
-		logger.WarnCF("email", "STARTTLS failed, connection may be unencrypted; credentials could be sent in plaintext", map[string]interface{}{
-			"error": err.Error(),
-		})
+		logger.WarnCF("email",
+			"STARTTLS failed, connection may be unencrypted; credentials could be sent in plaintext",
+			map[string]interface{}{"error": err.Error()})
 		_ = err
 	}
 	auth := smtp.PlainAuth("", c.config.Username, c.config.Password, host)
@@ -291,7 +292,9 @@ func (c *EmailChannel) connect() error {
 	status, err := cl.Select(mailbox, false)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unsafe Login") || strings.Contains(err.Error(), "不安全") {
-			return fmt.Errorf("failed to select mailbox %s: %w (hint: 163/QQ/126 require app password, not account password)", mailbox, err)
+			return fmt.Errorf(
+				"failed to select mailbox %s: %w (hint: 163/QQ/126 require app password, not account password)",
+				mailbox, err)
 		}
 		return fmt.Errorf("failed to select mailbox %s: %w", mailbox, err)
 	}
@@ -832,7 +835,7 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 	if dir == "" {
 		return ""
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		logger.DebugCF("email", "Failed to create attachment dir", map[string]interface{}{"error": err.Error(), "dir": dir})
 		return ""
 	}
