@@ -86,13 +86,14 @@ func TestEmailChannel_decodeRFC2047Filename(t *testing.T) {
 }
 
 func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
-	c := &EmailChannel{
-		config: config.EmailConfig{
-			AttachmentDir: t.TempDir(),
-		},
+	c, err := NewEmailChannel(config.EmailConfig{
+		AttachmentDir: t.TempDir(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("failed to create email channel: %v", err)
 	}
 	t.Run("nil message", func(t *testing.T) {
-		content, paths := c.extractEmailBodyAndAttachments(nil)
+		content, paths := c.extractEmailBodyAndAttachments(nil, "")
 		assert.Empty(t, content)
 		assert.Nil(t, paths)
 	})
@@ -106,7 +107,7 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 			Envelope: &imap.Envelope{Subject: "Test"},
 			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
 		}
-		content, paths := c.extractEmailBodyAndAttachments(msg)
+		content, paths := c.extractEmailBodyAndAttachments(msg, "scope")
 		assert.Contains(t, content, "Subject: Test")
 		assert.Contains(t, content, "Hello world")
 		assert.Empty(t, paths)
@@ -122,7 +123,7 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 			Envelope: &imap.Envelope{Subject: "Test"},
 			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
 		}
-		content, paths := c.extractEmailBodyAndAttachments(msg)
+		content, paths := c.extractEmailBodyAndAttachments(msg, "scope")
 		assert.Contains(t, content, "Subject: Test")
 		assert.Contains(t, content, "Hello world")
 		assert.Empty(t, paths)
@@ -165,19 +166,20 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 			Envelope: &imap.Envelope{Subject: "Test"},
 			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
 		}
-		content, paths := c.extractEmailBodyAndAttachments(msg)
+		content, paths := c.extractEmailBodyAndAttachments(msg, "scope")
 		assert.Contains(t, content, "this body")
 		assert.NotEmpty(t, paths)
 		assert.Equal(t, 1, len(paths))
 		assert.Contains(t, paths[0], filepath.Base(paths[0]))
 	})
 
-	newLimitClient := &EmailChannel{
-		config: config.EmailConfig{
-			BodyPartMaxBytes:   1,
-			AttachmentDir:      t.TempDir(),
-			AttachmentMaxBytes: 1024,
-		},
+	newLimitClient, err := NewEmailChannel(config.EmailConfig{
+		BodyPartMaxBytes:   1,
+		AttachmentDir:      t.TempDir(),
+		AttachmentMaxBytes: 1024,
+	}, nil)
+	if err != nil {
+		t.Fatalf("failed to create email channel: %v", err)
 	}
 	t.Run("body part max bytes", func(t *testing.T) {
 		mimeBytes := attachmentwithText
@@ -187,7 +189,7 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 			Envelope: &imap.Envelope{Subject: "Test"},
 			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
 		}
-		content, paths := newLimitClient.extractEmailBodyAndAttachments(msg)
+		content, paths := newLimitClient.extractEmailBodyAndAttachments(msg, "scope")
 		assert.Contains(
 			t,
 			content,
@@ -237,22 +239,25 @@ func TestEmailChannel_extractTextFromHTML(t *testing.T) {
 
 func Test_saveAttachmentToLocal(t *testing.T) {
 	tmpDir := t.TempDir()
-	c := &EmailChannel{
-		config: config.EmailConfig{
-			AttachmentDir: tmpDir,
-		},
+	c, err := NewEmailChannel(config.EmailConfig{
+		AttachmentDir: tmpDir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("failed to create email channel: %v", err)
 	}
 	content := "Hello world"
 	body := bytes.NewReader([]byte(content))
 	// test attachment max bytes
 	c.config.AttachmentMaxBytes = len([]byte(content))
-	path := c.saveAttachmentToLocal(1, 1, "test.txt", body)
+	size, path := c.saveAttachmentToLocal(1, 1, "test.txt", int64(len([]byte(content))), body)
+	assert.Equal(t, int64(len([]byte(content))), size)
 	assert.NotEmpty(t, path)
 	assert.Equal(t, path, filepath.Join(tmpDir, "1_1_test.txt"))
 
 	// test greater than attachment max bytes
 	c.config.AttachmentMaxBytes = len([]byte(content)) - 1
 	body = bytes.NewReader([]byte(content))
-	path = c.saveAttachmentToLocal(1, 1, "test.txt", body)
+	size, path = c.saveAttachmentToLocal(1, 1, "test.txt", int64(len([]byte(content))-1), body)
+	assert.Equal(t, int64(0), size)
 	assert.Empty(t, path)
 }

@@ -93,7 +93,7 @@ func TestEmailChannel_checkNewEmails(t *testing.T) {
 			}).Build()
 		// --------------- mock end ---------------
 		ctx := context.Background()
-		c.CheckNewEmails(context.Background())
+		c.checkNewEmails(context.Background())
 		timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		messge, ok := msgBus.ConsumeInbound(timeoutCtx)
@@ -125,8 +125,12 @@ func TestEmailChannel_runIdleLoop(t *testing.T) {
 		c.lastUID = 20
 		mockClient := &client.Client{}
 		c.imapClient = mockClient
-		mockey.Mock(mockey.GetMethod(c, "CheckNewEmails")).To(func(*EmailChannel, context.Context) {
+		mockClient.SetState(imap.SelectedState, &imap.MailboxStatus{
+			UidNext: 20,
+		})
+		mockey.Mock(mockey.GetMethod(mockClient, "UidSearch")).To(func(*client.Client, *imap.SearchCriteria) ([]uint32, error) {
 			hasCheckEmail = true
+			return []uint32{}, nil
 		}).Build()
 
 		mockey.Mock(mockey.GetMethod(mockClient, "State")).To(func(*client.Client) imap.ConnState {
@@ -176,8 +180,16 @@ func TestEmailChannel_lifecycleCheck(t *testing.T) {
 		mockey.Mock(mockey.GetMethod(c, "connect")).To(func(*EmailChannel) error {
 			return nil
 		}).Build()
-		mockey.Mock(mockey.GetMethod(c, "CheckNewEmails")).To(func(*EmailChannel, context.Context) {
+		c.imapClient = &client.Client{}
+		c.imapClient.SetState(imap.SelectedState, &imap.MailboxStatus{
+			UidNext: 20,
+		})
+		mockey.Mock(mockey.GetMethod(c.imapClient, "UidSearch")).To(func(*client.Client, *imap.SearchCriteria) ([]uint32, error) {
 			time.Sleep(1 * time.Second)
+			return []uint32{}, nil
+		}).Build()
+		mockey.Mock(mockey.GetMethod(c.imapClient, "Logout")).To(func(*client.Client) error {
+			return nil
 		}).Build()
 		// --------------- mock end ---------------
 		ctx := context.Background()

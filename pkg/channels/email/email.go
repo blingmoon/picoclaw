@@ -28,6 +28,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/identity"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -125,11 +126,12 @@ func (c *EmailChannel) Stop(ctx context.Context) error {
 		c.checkTicker.Stop()
 		c.checkTicker = nil
 	}
-	if c.imapClient != nil {
-		c.imapClient.Logout()
-		c.imapClient = nil
-	}
+	imapClient := c.imapClient
+	c.imapClient = nil
 	c.mu.Unlock()
+	if imapClient != nil {
+		_ = imapClient.Logout()
+	}
 
 	c.loopWg.Wait() // wait for checkLoop goroutine to exit
 
@@ -146,7 +148,7 @@ func sanitizeHeaderValue(s string) string {
 
 func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
-		return fmt.Errorf("email channel not running")
+		return channels.ErrNotRunning
 	}
 	if strings.TrimSpace(c.config.SMTPServer) == "" {
 		return fmt.Errorf("email channel send: SMTP not configured (set smtp_server)")
@@ -467,7 +469,7 @@ func (c *EmailChannel) checkLoop(ctx context.Context) {
 	}
 
 	// Run one check immediately
-	c.CheckNewEmails(ctx)
+	c.checkNewEmails(ctx)
 
 	if !c.config.ForcedPolling {
 		// support IDLE user idle loop, waiting for server push update
@@ -487,7 +489,7 @@ func (c *EmailChannel) checkLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			c.CheckNewEmails(ctx)
+			c.checkNewEmails(ctx)
 		}
 	}
 }
@@ -558,7 +560,7 @@ func (c *EmailChannel) runIdleLoop(ctx context.Context, pollInterval time.Durati
 					return
 				}
 			}
-			c.CheckNewEmails(ctx)
+			c.checkNewEmails(ctx)
 		case err := <-idleDone:
 			// Idle returned (timeout restart or error)
 			if err != nil {
@@ -578,12 +580,12 @@ func (c *EmailChannel) runIdleLoop(ctx context.Context, pollInterval time.Durati
 					return
 				}
 			}
-			c.CheckNewEmails(ctx)
+			c.checkNewEmails(ctx)
 		}
 	}
 }
 
-func (c *EmailChannel) CheckNewEmails(ctx context.Context) {
+func (c *EmailChannel) checkNewEmails(ctx context.Context) {
 	// the lock is to avoid duplicate check email, maybe multiple goroutine check email at the same time
 	c.checkEmailMutex.Lock()
 	defer c.checkEmailMutex.Unlock()
@@ -739,16 +741,10 @@ func (c *EmailChannel) processEmail(ctx context.Context, msg *imap.Message) {
 		CanonicalID: identity.BuildCanonicalID("email", senderID),
 	}
 
-	// Check allowlist (HandleMessage will also check; we avoid duplicate work by passing SenderInfo)
-	if !c.IsAllowedSender(senderInfo) {
-		logger.DebugCF("email", "Email from unauthorized sender", map[string]any{
-			"sender": senderID,
-		})
-		return
-	}
+	attachmentScope := channels.BuildMediaScope("email", senderID, fmt.Sprintf("%d", msg.Uid))
 
 	// Extract body and attachments (attachments saved to AttachmentDir, paths in mediaPaths)
-	content, mediaPaths := c.extractEmailBodyAndAttachments(msg)
+	content, mediaPaths := c.extractEmailBodyAndAttachments(msg, attachmentScope)
 	if content == "" {
 		content = "[empty email body]"
 	}
@@ -782,7 +778,9 @@ func (c *EmailChannel) processEmail(ctx context.Context, msg *imap.Message) {
 }
 
 // extractEmailBodyAndAttachments parses body and saves attachments to AttachmentDir; returns body text and local paths.
-func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (content string, mediaPaths []string) {
+func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message,
+	attachmentscope string,
+) (content string, mediaPaths []string) {
 	if msg == nil {
 		return "", nil
 	}
@@ -816,8 +814,19 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 	var attachmentRefs []string
 	attachmentIndex := 0
 	saveDir := strings.TrimSpace(c.config.AttachmentDir)
-
+	bodyTotalRemainingSize := int64(c.config.BodyPartMaxBytes)
+	if bodyTotalRemainingSize <= 0 {
+		bodyTotalRemainingSize = int64(defaultBodyPartMaxBytes)
+	}
+	attachmentTotalRemainingSize := int64(c.config.AttachmentMaxBytes)
+	if attachmentTotalRemainingSize <= 0 {
+		attachmentTotalRemainingSize = int64(defaultAttachmentMaxBytes)
+	}
 	for {
+		if attachmentTotalRemainingSize <= 0 && bodyTotalRemainingSize <= 0 {
+			// can't read more parts , break the loop
+			break
+		}
 		p, err := mr.NextPart()
 		if err == io.EOF {
 			break
@@ -831,47 +840,85 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 		isAttachment := isAttachmentPart(p.Header)
 
 		if isAttachment {
+			if attachmentTotalRemainingSize <= 0 {
+				// if attachment limit is exceeded, skip the attachment
+				logger.InfoCF("email", "Attachment limit exceeded, skipping attachment",
+					map[string]any{"attachment_total_rest_size": attachmentTotalRemainingSize})
+				continue
+			}
 			filename := getPartFilename(p.Header)
 			if filename == "" {
 				filename = fmt.Sprintf("attachment_%d", attachmentIndex)
 			}
 			attachmentIndex++
+			// pre check the attachment size
+			size, ok := getPartFileSize(p.Header)
+			if ok {
+				// size is estimated size, may not be accurate
+				// if ok check if the attachment size exceeds the limit
+				if size > int64(c.config.AttachmentMaxBytes) {
+					logger.DebugCF("email", "Attachment size exceeds limit",
+						map[string]any{"size": size, "limit": c.config.AttachmentMaxBytes})
+					attachmentRefs = append(attachmentRefs,
+						fmt.Sprintf("[attachment: %s (save failed, check attachment_max_bytes in config)]", filename))
+					continue
+				}
+			}
 
 			var localPath string
+			var attachmentSize int64
 			if saveDir != "" {
-				localPath = c.saveAttachmentToLocal(msg.Uid, attachmentIndex, filename, p.Body)
+				attachmentSize, localPath = c.saveAttachmentToLocal(msg.Uid, attachmentIndex,
+					filename, attachmentTotalRemainingSize, p.Body)
 				if localPath != "" {
 					mediaPaths = append(mediaPaths, localPath)
-					attachmentRefs = append(attachmentRefs, fmt.Sprintf("[attachment: %s]", filepath.Base(localPath)))
+					if store := c.GetMediaStore(); store != nil {
+						ref, storeErr := store.Store(localPath, media.MediaMeta{
+							Filename: filename,
+							Source:   "email",
+						}, attachmentscope)
+						if storeErr == nil {
+							attachmentRefs = append(attachmentRefs, ref)
+						} else {
+							attachmentRefs = append(attachmentRefs,
+								fmt.Sprintf("[attachment: %s]", filepath.Base(localPath)))
+						}
+					}
 				} else {
 					attachmentRefs = append(attachmentRefs,
 						fmt.Sprintf("[attachment: %s (save failed, check attachment_max_bytes in config)]", filename))
 				}
+				attachmentTotalRemainingSize = attachmentTotalRemainingSize - attachmentSize
 			} else {
 				attachmentRefs = append(attachmentRefs, fmt.Sprintf("[attachment: %s]", filename))
 			}
 			continue
 		}
-
-		limit := int64(c.config.BodyPartMaxBytes)
-		if limit <= 0 {
-			limit = int64(defaultBodyPartMaxBytes)
+		if bodyTotalRemainingSize <= 0 {
+			// if limit is 0, skip the body part
+			logger.InfoCF("email", "Body limit exceeded, skipping body part",
+				map[string]any{"body_total_rest_size": bodyTotalRemainingSize})
+			continue
 		}
-		limitedBody := io.LimitReader(p.Body, limit+1)
+		limitedBody := io.LimitReader(p.Body, bodyTotalRemainingSize+1)
 		body, err := io.ReadAll(limitedBody)
 		if err != nil || len(body) == 0 {
 			continue
 		}
-		if len(body) > int(limit) {
+		if len(body) > int(bodyTotalRemainingSize) {
+			// if limit is exceeded, append the body part and a warning message
 			textParts = append(
 				textParts,
+				strings.TrimSpace(string(body)),
 				fmt.Sprintf(
 					"[body part exceeds size limit (max %d bytes), you can check body_part_max_bytes in config]",
-					limit,
+					bodyTotalRemainingSize,
 				),
 			)
+			bodyTotalRemainingSize = 0
 			continue
 		}
+		bodyTotalRemainingSize = bodyTotalRemainingSize - int64(len(body))
 		bodyStr := strings.TrimSpace(string(body))
 		if bodyStr == "" {
 			continue
@@ -913,18 +960,20 @@ func (c *EmailChannel) extractEmailBodyAndAttachments(msg *imap.Message) (conten
 }
 
 // saveAttachmentToLocal writes the attachment stream to AttachmentDir with size limit; returns local path or empty on failure or if over limit.
-func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename string, r io.Reader) string {
+// return the size of the attachment and the local path
+func (c *EmailChannel) saveAttachmentToLocal(uid uint32,
+	index int,
+	filename string,
+	limit int64,
+	r io.Reader,
+) (int64, string) {
 	dir := strings.TrimSpace(c.config.AttachmentDir)
 	if dir == "" {
-		return ""
+		return 0, ""
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		logger.DebugCF("email", "Failed to create attachment dir", map[string]any{"error": err.Error(), "dir": dir})
-		return ""
-	}
-	limit := int64(c.config.AttachmentMaxBytes)
-	if limit <= 0 {
-		limit = defaultAttachmentMaxBytes
+		return 0, ""
 	}
 	safeName := utils.SanitizeFilename(filename)
 	if safeName == "" {
@@ -940,7 +989,7 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 			"Failed to create attachment file",
 			map[string]any{"error": err.Error(), "path": localPath},
 		)
-		return ""
+		return 0, ""
 	}
 	defer f.Close()
 	// +1 to detect if the attachment exceeds the limit
@@ -949,7 +998,7 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 	if err != nil {
 		_ = os.Remove(localPath)
 		logger.DebugCF("email", "Failed to write attachment", map[string]any{"error": err.Error(), "path": localPath})
-		return ""
+		return 0, ""
 	}
 	if n > limit {
 		_ = os.Remove(localPath)
@@ -958,9 +1007,9 @@ func (c *EmailChannel) saveAttachmentToLocal(uid uint32, index int, filename str
 			"Attachment exceeds size limit, skipped",
 			map[string]any{"path": localPath, "limit": limit},
 		)
-		return ""
+		return 0, ""
 	}
-	return localPath
+	return n, localPath
 }
 
 // getPartFilename gets the attachment filename from MIME part header and decodes RFC 2047 (e.g. =?GBK?Q?...?=) to UTF-8.
@@ -983,6 +1032,43 @@ func getPartFilename(h mail.PartHeader) string {
 		return ""
 	}
 	return decodeRFC2047Filename(raw)
+}
+
+func getPartFileSize(h mail.PartHeader) (int64, bool) {
+	if h == nil {
+		return 0, false
+	}
+	disp := h.Get("Content-Disposition")
+	if disp == "" {
+		return 0, false
+	}
+	raw := parseFilenameFromDisposition(disp)
+	if raw == "" {
+		return 0, false
+	}
+	return getPartFileSizeFromDisposition(disp)
+}
+
+func getPartFileSizeFromDisposition(disp string) (int64, bool) {
+	dispLower := strings.ToLower(disp)
+	if !strings.Contains(dispLower, "attachment") && !strings.Contains(dispLower, "inline") {
+		return 0, false
+	}
+	const fn = "size="
+	i := strings.Index(dispLower, fn)
+	if i < 0 {
+		return 0, false
+	}
+	disp = disp[i+len(fn):]
+	disp = strings.TrimSpace(disp)
+	if disp == "" {
+		return 0, false
+	}
+	size, err := strconv.ParseInt(disp, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return size, true
 }
 
 // parseFilenameFromDisposition parses the filename= value from Content-Disposition header.
