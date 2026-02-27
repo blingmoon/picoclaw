@@ -164,14 +164,20 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 		return fmt.Errorf("email channel send: missing recipient (chat_id)")
 	}
 
+	client, err := c.dialSMTP()
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
 	// Build message with go-message/mail: RFC-compliant headers via textproto (folding, encoded-words, address list format).
 	var h mail.Header
-	if fromAddrs, err := mail.ParseAddressList(fromRaw); err == nil && len(fromAddrs) > 0 {
+	if fromAddrs, parseErr := mail.ParseAddressList(fromRaw); parseErr == nil && len(fromAddrs) > 0 {
 		h.SetAddressList("From", fromAddrs)
 	} else {
 		h.Set("From", fromRaw)
 	}
-	if toAddrs, err := mail.ParseAddressList(toRaw); err == nil && len(toAddrs) > 0 {
+	if toAddrs, parseErr := mail.ParseAddressList(toRaw); parseErr == nil && len(toAddrs) > 0 {
 		h.SetAddressList("To", toAddrs)
 	} else {
 		h.Set("To", toRaw)
@@ -192,68 +198,7 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 	}
 	body := buf.Bytes()
 
-	port := c.config.SMTPPort
-	if port <= 0 {
-		port = 465
-	}
-	addr := net.JoinHostPort(c.config.SMTPServer, strconv.Itoa(port))
 	host := c.config.SMTPServer
-
-	if c.config.SMTPUseTLS {
-		// Port 465: implicit TLS
-		tlsConfig := &tls.Config{ServerName: host}
-		conn, tlserr := tls.Dial("tcp", addr, tlsConfig)
-		if tlserr != nil {
-			return fmt.Errorf("smtp tls dial: %w", tlserr)
-		}
-		defer conn.Close()
-		client, newClientErr := smtp.NewClient(conn, host)
-		if newClientErr != nil {
-			return fmt.Errorf("smtp new client: %w", newClientErr)
-		}
-		defer client.Close()
-		auth := smtp.PlainAuth("", c.config.Username, c.config.Password, host)
-		if err = client.Auth(auth); err != nil {
-			return fmt.Errorf("smtp auth: %w", err)
-		}
-		if err = client.Mail(fromRaw); err != nil {
-			return fmt.Errorf("smtp mail: %w", err)
-		}
-		if err = client.Rcpt(toRaw); err != nil {
-			return fmt.Errorf("smtp rcpt: %w", err)
-		}
-		w, dataErr := client.Data()
-		if dataErr != nil {
-			return fmt.Errorf("smtp data: %w", dataErr)
-		}
-		if _, err = w.Write(body); err != nil {
-			_ = w.Close()
-			return fmt.Errorf("smtp write: %w", err)
-		}
-		if err = w.Close(); err != nil {
-			return fmt.Errorf("smtp data close: %w", err)
-		}
-		return client.Quit()
-	}
-
-	// Port 587 etc.: TCP first, then STARTTLS if needed
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("smtp dial: %w", err)
-	}
-	defer conn.Close()
-	client, err := smtp.NewClient(conn, host)
-	if err != nil {
-		return fmt.Errorf("smtp new client: %w", err)
-	}
-	defer client.Close()
-	if err = client.StartTLS(&tls.Config{ServerName: host}); err != nil {
-		// Some servers on 587 do not require STARTTLS; continue anyway
-		logger.WarnCF("email",
-			"STARTTLS failed, connection may be unencrypted; credentials could be sent in plaintext",
-			map[string]any{"error": err.Error()})
-		_ = err
-	}
 	auth := smtp.PlainAuth("", c.config.Username, c.config.Password, host)
 	if err = client.Auth(auth); err != nil {
 		return fmt.Errorf("smtp auth: %w", err)
@@ -264,15 +209,211 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 	if err = client.Rcpt(toRaw); err != nil {
 		return fmt.Errorf("smtp rcpt: %w", err)
 	}
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("smtp data: %w", err)
+	w, dataErr := client.Data()
+	if dataErr != nil {
+		return fmt.Errorf("smtp data: %w", dataErr)
 	}
 	if _, err = w.Write(body); err != nil {
 		_ = w.Close()
 		return fmt.Errorf("smtp write: %w", err)
 	}
 	if err = w.Close(); err != nil {
+		return fmt.Errorf("smtp data close: %w", err)
+	}
+	return client.Quit()
+}
+
+// dialSMTP connect to SMTP server and return *smtp.Client, caller is responsible for Close.
+func (c *EmailChannel) dialSMTP() (*smtp.Client, error) {
+	port := c.config.SMTPPort
+	if port <= 0 {
+		port = 465
+	}
+	addr := net.JoinHostPort(c.config.SMTPServer, strconv.Itoa(port))
+	host := c.config.SMTPServer
+
+	if c.config.SMTPUseTLS {
+		tlsConfig := &tls.Config{ServerName: host}
+		conn, tlserr := tls.Dial("tcp", addr, tlsConfig)
+		if tlserr != nil {
+			return nil, fmt.Errorf("smtp tls dial: %w", tlserr)
+		}
+		client, newClientErr := smtp.NewClient(conn, host)
+		if newClientErr != nil {
+			conn.Close()
+			return nil, fmt.Errorf("smtp new client: %w", newClientErr)
+		}
+		return client, nil
+	}
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("smtp dial: %w", err)
+	}
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("smtp new client: %w", err)
+	}
+	if err = client.StartTLS(&tls.Config{ServerName: host}); err != nil {
+		logger.WarnCF("email",
+			"STARTTLS failed, connection may be unencrypted; credentials could be sent in plaintext",
+			map[string]any{"error": err.Error()})
+		_ = err
+	}
+	return client, nil
+}
+
+func (c *EmailChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+	if strings.TrimSpace(c.config.SMTPServer) == "" {
+		return fmt.Errorf("email channel send: SMTP not configured (set smtp_server)")
+	}
+	store := c.GetMediaStore()
+	if store == nil {
+		return fmt.Errorf("no media store available: %w", channels.ErrSendFailed)
+	}
+	fromRaw := sanitizeHeaderValue(c.config.Username)
+	toRaw := sanitizeHeaderValue(strings.TrimSpace(msg.ChatID))
+	if toRaw == "" {
+		return fmt.Errorf("email channel send: missing recipient (chat_id)")
+	}
+	if len(msg.Parts) == 0 {
+		return fmt.Errorf("email channel send media: no parts")
+	}
+
+	client, err := c.dialSMTP()
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	host := c.config.SMTPServer
+	auth := smtp.PlainAuth("", c.config.Username, c.config.Password, host)
+	if err = client.Auth(auth); err != nil {
+		return fmt.Errorf("smtp auth: %w", err)
+	}
+	if err = client.Mail(fromRaw); err != nil {
+		return fmt.Errorf("smtp mail: %w", err)
+	}
+	if err = client.Rcpt(toRaw); err != nil {
+		return fmt.Errorf("smtp rcpt: %w", err)
+	}
+	dataWriter, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("smtp data: %w", err)
+	}
+
+	// build multipart message and write to SMTP DATA writer; attachments are streamed using io.Copy, never load the whole file into memory.
+	var h mail.Header
+	if fromAddrs, parseErr := mail.ParseAddressList(fromRaw); parseErr == nil && len(fromAddrs) > 0 {
+		h.SetAddressList("From", fromAddrs)
+	} else {
+		h.Set("From", fromRaw)
+	}
+	if toAddrs, parseErr := mail.ParseAddressList(toRaw); parseErr == nil && len(toAddrs) > 0 {
+		h.SetAddressList("To", toAddrs)
+	} else {
+		h.Set("To", toRaw)
+	}
+	h.SetSubject(sanitizeHeaderValue("Media from PicoClaw"))
+
+	mw, err := mail.CreateWriter(dataWriter, h)
+	if err != nil {
+		_ = dataWriter.Close()
+		return fmt.Errorf("email build multipart message: %w", err)
+	}
+
+	// body text: concatenate the captions of all parts
+	bodyText := ""
+	for _, p := range msg.Parts {
+		if p.Caption != "" {
+			if bodyText != "" {
+				bodyText += "\n\n"
+			}
+			bodyText += p.Caption
+		}
+	}
+	if bodyText == "" {
+		bodyText = "Media from PicoClaw"
+	}
+	var inlineHeader mail.InlineHeader
+	inlineHeader.Set("Content-Type", "text/plain; charset=utf-8")
+	bodyPart, err := mw.CreateSingleInline(inlineHeader)
+	if err != nil {
+		_ = mw.Close()
+		_ = dataWriter.Close()
+		return fmt.Errorf("email create inline part: %w", err)
+	}
+	if _, err = bodyPart.Write([]byte(bodyText)); err != nil {
+		_ = bodyPart.Close()
+		_ = mw.Close()
+		_ = dataWriter.Close()
+		return fmt.Errorf("email write body: %w", err)
+	}
+	if err = bodyPart.Close(); err != nil {
+		_ = mw.Close()
+		_ = dataWriter.Close()
+		return fmt.Errorf("email close inline part: %w", err)
+	}
+
+	// attachments: stream from local file to part writer, never load the whole file into memory
+	for _, part := range msg.Parts {
+		localPath, resolveErr := store.Resolve(part.Ref)
+		if resolveErr != nil {
+			logger.ErrorCF("email", "Failed to resolve media ref",
+				map[string]any{"ref": part.Ref, "error": resolveErr.Error()})
+			continue
+		}
+		f, openErr := os.Open(localPath)
+		if openErr != nil {
+			logger.ErrorCF("email", "Failed to open media file",
+				map[string]any{"path": localPath, "error": openErr.Error()})
+			continue
+		}
+		filename := part.Filename
+		if filename == "" {
+			filename = filepath.Base(localPath)
+		}
+		if filename == "" {
+			filename = "attachment"
+		}
+		contentType := part.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		var attH mail.AttachmentHeader
+		attH.SetFilename(filename)
+		attH.Set("Content-Type", contentType)
+		partWriter, createErr := mw.CreateAttachment(attH)
+		if createErr != nil {
+			f.Close()
+			_ = mw.Close()
+			_ = dataWriter.Close()
+			return fmt.Errorf("email create attachment part: %w", createErr)
+		}
+		_, err = io.Copy(partWriter, f)
+		f.Close()
+		if err != nil {
+			_ = partWriter.Close()
+			_ = mw.Close()
+			_ = dataWriter.Close()
+			return fmt.Errorf("email write attachment: %w", err)
+		}
+		if err = partWriter.Close(); err != nil {
+			_ = mw.Close()
+			_ = dataWriter.Close()
+			return fmt.Errorf("email close attachment part: %w", err)
+		}
+	}
+
+	if err = mw.Close(); err != nil {
+		_ = dataWriter.Close()
+		return fmt.Errorf("email close multipart: %w", err)
+	}
+	if err = dataWriter.Close(); err != nil {
 		return fmt.Errorf("smtp data close: %w", err)
 	}
 	return client.Quit()
