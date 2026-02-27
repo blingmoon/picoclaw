@@ -9,8 +9,8 @@ require (
 	github.com/bytedance/mockey v1.4.4
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/chzyer/readline v1.5.1
-	github.com/emersion/go-imap v1.2.1
-	github.com/emersion/go-message v0.17.0
+	github.com/emersion/go-imap/v2 v2.0.0-beta.8
+	github.com/emersion/go-message v0.18.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
@@ -27,8 +27,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect
-	github.com/emersion/go-textwrapper v0.0.0-20200911093747-65d896831594 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

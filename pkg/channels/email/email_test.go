@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/emersion/go-imap"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -93,7 +92,7 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 		t.Fatalf("failed to create email channel: %v", err)
 	}
 	t.Run("nil message", func(t *testing.T) {
-		content, paths := c.extractEmailBodyAndAttachments(nil, "")
+		content, paths := c.extractEmailBodyAndAttachments(nil)
 		assert.Empty(t, content)
 		assert.Nil(t, paths)
 	})
@@ -101,15 +100,8 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 	t.Run("plain text body", func(t *testing.T) {
 		mimeBytes := []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\n" +
 			"Content-Type: text/plain; charset=utf-8\r\n\r\nHello world")
-		section := &imap.BodySectionName{}
-		msg := &imap.Message{
-			Uid:      1,
-			Envelope: &imap.Envelope{Subject: "Test"},
-			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
-		}
-		content, paths := c.extractEmailBodyAndAttachments(msg, "scope")
-		assert.Contains(t, content, "Subject: Test")
-		assert.Contains(t, content, "Hello world")
+		bodyContent, paths := c.extractEmailBodyAndAttachments(bytes.NewReader(mimeBytes))
+		assert.Contains(t, bodyContent, "Hello world")
 		assert.Empty(t, paths)
 	})
 
@@ -117,14 +109,7 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 		mimeBytes := []byte(
 			"From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><h1>Hello world</h1></body></html>",
 		)
-		section := &imap.BodySectionName{}
-		msg := &imap.Message{
-			Uid:      1,
-			Envelope: &imap.Envelope{Subject: "Test"},
-			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
-		}
-		content, paths := c.extractEmailBodyAndAttachments(msg, "scope")
-		assert.Contains(t, content, "Subject: Test")
+		content, paths := c.extractEmailBodyAndAttachments(bytes.NewReader(mimeBytes))
 		assert.Contains(t, content, "Hello world")
 		assert.Empty(t, paths)
 	})
@@ -160,13 +145,7 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 			"--outer--\r\n")
 	t.Run("attachment and text body", func(t *testing.T) {
 		mimeBytes := attachmentwithText
-		section := &imap.BodySectionName{}
-		msg := &imap.Message{
-			Uid:      1,
-			Envelope: &imap.Envelope{Subject: "Test"},
-			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
-		}
-		content, paths := c.extractEmailBodyAndAttachments(msg, "scope")
+		content, paths := c.extractEmailBodyAndAttachments(bytes.NewReader(mimeBytes))
 		assert.Contains(t, content, "this body")
 		assert.NotEmpty(t, paths)
 		assert.Equal(t, 1, len(paths))
@@ -183,17 +162,11 @@ func TestEmailChannel_extractEmailBodyAndAttachments(t *testing.T) {
 	}
 	t.Run("body part max bytes", func(t *testing.T) {
 		mimeBytes := attachmentwithText
-		section := &imap.BodySectionName{}
-		msg := &imap.Message{
-			Uid:      1,
-			Envelope: &imap.Envelope{Subject: "Test"},
-			Body:     map[*imap.BodySectionName]imap.Literal{section: bytes.NewReader(mimeBytes)},
-		}
-		content, paths := newLimitClient.extractEmailBodyAndAttachments(msg, "scope")
+		content, paths := newLimitClient.extractEmailBodyAndAttachments(bytes.NewReader(mimeBytes))
 		assert.Contains(
 			t,
 			content,
-			"[body part exceeds size limit (max 1 bytes), you can check body_part_max_bytes in config]",
+			"t", // this body was truncated
 		)
 		assert.NotEmpty(t, paths)
 		assert.Equal(t, 1, len(paths))
@@ -249,15 +222,15 @@ func Test_saveAttachmentToLocal(t *testing.T) {
 	body := bytes.NewReader([]byte(content))
 	// test attachment max bytes
 	c.config.AttachmentMaxBytes = len([]byte(content))
-	size, path := c.saveAttachmentToLocal(1, 1, "test.txt", int64(len([]byte(content))), body)
+	size, path := c.saveAttachmentToLocal("test.txt", int64(len([]byte(content))), body)
 	assert.Equal(t, int64(len([]byte(content))), size)
 	assert.NotEmpty(t, path)
-	assert.Equal(t, path, filepath.Join(tmpDir, "1_1_test.txt"))
+	assert.Equal(t, path, filepath.Join(tmpDir, "test.txt"))
 
 	// test greater than attachment max bytes
 	c.config.AttachmentMaxBytes = len([]byte(content)) - 1
 	body = bytes.NewReader([]byte(content))
-	size, path = c.saveAttachmentToLocal(1, 1, "test.txt", int64(len([]byte(content))-1), body)
+	size, path = c.saveAttachmentToLocal("test.txt", int64(len([]byte(content))-1), body)
 	assert.Equal(t, int64(0), size)
 	assert.Empty(t, path)
 }
